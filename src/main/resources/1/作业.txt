@@ -1,0 +1,163 @@
+一.  计算器课程作业报告
+
+ 一、开发工具和平台
+
+1. 开发语言与技术
+- Java（用于实现界面与计算逻辑）
+- Swing（GUI 图形界面库，用于绘制计算器窗口、按钮、菜单等）
+- Spring Boot（用于组件管理与依赖注入，例如 CalculatorFrame、ExpressionEvaluator 通过 @Component 交给容器创建）
+
+2. 开发工具
+- IntelliJ IDEA（编写代码、调试、运行项目）
+- Maven（项目依赖管理与构建，随 Spring Boot 工程使用）
+
+3. 运行平台
+- 操作系统：Windows / Linux / macOS 均可运行（本项目实际测试在 Linux 环境下运行）
+- JDK：OpenJDK（项目可在 JDK 17+ 环境编译运行；实际运行中使用了较新版本 JDK）
+- 图形环境：桌面系统的窗口管理器（用于显示 Swing 窗口）
+
+---
+
+ 二、设计思路
+
+ 1. 界面设计
+
+1) 整体布局
+- 使用 JFrame 作为主窗口（CalculatorFrame）。
+顶部标题栏：居中显示计算机，可随系统深色浅色变背景
+菜单栏： 标题栏下设置菜单栏，分别有查看、编辑、帮助三大功能。
+主界面: 分为两大区域
+  - 顶部显示区：包含历史表达式 historyLabel 和主显示框 display（JTextField），用于展示输入表达式与计算结果。
+  - 按钮区：使用 GridLayout 进行网格排布，分为标准区与科学区两部分，模拟 Windows 计算器布局。
+
+2) 按钮设计与风格统一
+- 不同类型按钮封装为工厂方法：
+  - 数字按钮 numBtn
+  - 运算符按钮 opBtn
+  - 清除按钮 clearBtn
+  - 等号按钮 equalBtn
+  - 科学函数按钮 sciBtn
+- 所有按钮统一采用扁平化暗色风格，利用 styleButton() 统一设置：
+  - 背景色、前景色
+  - 鼠标悬停变色（hover）
+  - 去掉默认边框与焦点框，使界面更接近系统计算器风格
+
+3) 菜单栏设计
+- 通过 JMenuBar 实现 “查看 / 编辑 / 帮助” 菜单。
+- 在“编辑”菜单中提供复制/粘贴功能（带快捷键 Ctrl+C / Ctrl+V）。
+- 对菜单相关组件通过 UIManager.put(...) 设置背景色、前景色、选中态颜色，避免在不同系统主题下出现可读性问题。
+
+4) 键盘输入支持
+- 为显示框绑定键盘监听，支持数字、运算符、括号、回车计算、退格删除等操作。
+- 实现“键盘 + 鼠标”两种输入方式，提高易用性。
+监听支持： 0 1 2 3 4 5 6 7 8 9 . + - * / ( ) ^ % = Enter Backspace Esc Delete
+Backspace （退格/删除一个字符，对应“⌫”）
+Esc （全清，对应“C”）
+Delete （清空当前，对应“CE”）
+
+---
+
+ 2. 逻辑设计
+
+1) 核心结构划分
+- CalculatorFrame：负责界面展示与事件处理（按钮点击、键盘输入、复制粘贴）。
+- ExpressionEvaluator：负责解析并计算表达式，返回结果。
+- 两者通过构造器注入关联，界面层不直接实现复杂计算逻辑，做到职责分离。
+
+2) 表达式计算逻辑
+- 采用递归下降解析实现表达式求值，支持：
+  - 加减乘除、取模（%）
+  - 括号
+  - 一元正负号
+  - 幂运算 ^
+  - 阶乘 !
+  - 常量 pi、e
+  - 科学函数：sin cos tan asin acos atan sinh cosh tanh ln log exp abs ceil floor round ...
+
+3) 运算优先级处理
+通过拆分语法规则保证优先级正确：
+- expr 处理 + -
+- term 处理 * / %
+- unary 处理一元 + -
+- power 处理 ^
+- factorial 处理 !
+- primary 处理数字、括号、函数、常量
+
+4) 结果显示与状态控制
+- 使用 showingResult 标识当前显示框内容是“结果”还是“正在输入的表达式”：
+  - 若已显示结果，再输入数字则清空并开始新表达式
+  - 若继续输入运算符，则可以在结果后继续运算
+
+---
+
+ 三、难点与解决方案
+
+ 难点 1：不同运算符显示与内部计算符号不一致
+- 界面上使用 ×、÷ 更符合用户习惯；
+- 但计算逻辑需要 *、/。
+- 解决方案：
+  - 界面输入时把 ×、÷ 转换为 *、/
+  - 在 ExpressionEvaluator.evaluate() 中统一做表达式标准化替换（replace）
+
+ 难点 2：科学函数与括号插入的交互
+- 科学函数（如 sin、sqrt）需要自动补齐括号并支持对当前值操作。
+- 解决方案：
+  - 在 onScientific() 内按不同函数类型分类处理：
+    - 函数型：插入 func( 或 func(cur)
+    - 常量型：插入 pi、e
+    - 一元操作：如 x²、1/x、√ 直接对当前表达式包裹生成新表达式
+
+ 难点 3：跨平台主题导致显示框文字颜色不可控（深浅色模式问题）
+- 在 Linux/GTK 等系统外观下，JTextField 的前景色可能被系统主题重绘覆盖，导致出现“浅色模式下白底白字/看不见”的问题。
+- 解决方案（按项目选择其一）：
+  1. 固定使用跨平台 Look & Feel（避免系统主题接管绘制），保证 setForeground/setBackground 生效；
+  2. 对显示框在关键时机重复应用主题属性（背景、前景、选中态颜色），提高稳定性；
+  3. 对菜单等组件使用 UIManager.put 覆盖默认配色，保证可读性。
+  //            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+
+ 难点 4：键盘输入与显示框自身编辑行为冲突
+- JTextField 如果允许编辑，会把按键直接插入文本，和自己写的 handleKeyEvent() 重复。
+- 解决方案：
+  - 通过 keyTyped 事件 consume() 掉默认输入，只保留自定义逻辑处理输入内容。
+
+ 难点5： 粘贴的文本不是纯文本引发ERROR
+ 可能引发java.lang.ClassNotFoundException: com/intellij/codeInsight/editorActions/FoldingData
+ 当程序粘贴时，JDK 在解析剪贴板数据格式或构造 DataFlavor 的过程中，可能会尝试加载这些对象对应的类（例如 com.intellij...）。但本计算器程序运行环境中并没有 IntelliJ 的相关类库，因此触发 ClassNotFoundException 并输出到控制台。
+为避免解析或接触剪贴板中的非纯文本对象数据，程序在粘贴时采取“只读取字符串文本”的策略：
+
+在读取之前先判断剪贴板是否支持 DataFlavor.stringFlavor
+只请求并处理 stringFlavor 对应的文本数据
+对任何异常进行捕获并忽略，避免控制台刷屏
+4）解决效果
+改动后，粘贴功能仍可正常使用（能粘贴普通文本表达式），同时避免了因剪贴板包含 IDEA 私有对象格式而导致的异常输出，提升了程序在不同环境下的稳定性与运行日志的整洁度。
+Copilot said: 下面是一段可直接写进报告的“问题—原因—解决方案—效果”描述，针对你这次 **Backspace 一次删除两个字符（双删）** 的问题。 --- ### 问题：Backspace 键一次会删除两个字符（双删） **1）问题现象**
+下面是一段可直接写进报告的“问题—原因—解决方案—效果”描述，针对你这次 Backspace 一次删除两个字符（双删） 的问题。
+
+问题：Backspace 键一次会删除两个字符（双删）
+1）问题现象
+在计算器主显示框（JTextField display）中使用键盘输入表达式时，按下 Backspace 进行删除，本应每次删除一个字符，但实际表现为按一次 Backspace 会连续删除两个字符，导致输入内容被意外删多。
+
+2）原因分析
+该项目中为了实现“自定义键盘输入规则”（数字、运算符、清除、计算等），在 JTextField 上添加了 KeyListener，并在 keyPressed 事件中手动调用了删除逻辑（onClear("⌫")）来删除一个字符。
+
+然而 JTextField 本身属于 Swing 的文本组件，它内部已经自带对 Backspace 的默认处理（Keymap/Action 机制）：
+
+当用户按下 Backspace 时，Swing 默认行为会删除一个字符；
+同时我们的 KeyListener 又额外执行了一次删除；
+因此出现“自定义删除 + JTextField 默认删除”叠加，最终产生“双删”。
+3）解决方案
+在处理功能键（Backspace/Enter/Esc/Delete）时，除了执行自定义逻辑外，还需要阻止事件继续传递给 JTextField 默认处理。具体做法是在 keyPressed 中处理完 Backspace 后调用：
+
+e.consume();
+表示该事件已被消费，Swing 不再执行默认的 Backspace 删除动作。
+
+4）解决效果
+修改后，按一次 Backspace 只会执行一次自定义删除逻辑，显示框每次仅删除一个字符，“双删”问题消失；同时保留了其他键盘快捷键（Enter 求值、Esc 清空、Delete 清空当前等）的正常功能。
+
+ * - 科学区 ( ) 点了没反应（因为原先走 onScientific 但未处理）
+ * - 点 tan 后键盘失效（按钮抢焦点，键盘事件不在 display 上）
+ * - 归零后键盘输入 5 变 05
+ * - 0 时按 ± 变 -0，继续输入变 -05
+ * - 发生错误后点 asin 变 asin(Error) / asin(无效表达式)
+ * - (-5)! / 0.5! 等异常被误显示为“不能除以零”

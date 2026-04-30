@@ -4,114 +4,101 @@ import org.springframework.stereotype.Component;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DocumentFilter;
 import java.awt.*;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
-import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 
 /**
- * Windows-style calculator GUI built with Java Swing.
- * <p>
- * Features:
- * <ul>
- *   <li>Standard calculator layout (0-9, operators, parentheses)</li>
- *   <li>Expression shown in top display; result shown after pressing "="</li>
- *   <li>Menu bar: Edit > Copy / Paste</li>
- *   <li>Scientific panel (sin, cos, tan, sqrt, log, ln, exp, pow, …)</li>
- *   <li>Keyboard input support</li>
- * </ul>
+ * 计算器主界面，使用 Swing 构建，包含：
+ * - 标题区： 窗口标题为“计算器”，可随背景色调整风格
+ * - 菜单栏：查看（切换模式）、编辑（复制/粘贴）、帮助（关于）
+ * - 显示区：主显示框（显示当前输入或结果）和历史记录标签（显示刚计算的表达式）
+ * - 按钮区：标准按钮（数字、基本运算符、清除等）和科学按钮（函数、常
+ * 常数等）
+ * - 键盘支持：数字、运算符、Enter（=）、Backspace（⌫）、Esc（C）等快捷键
  */
 @Component
 public class CalculatorFrame extends JFrame {
 
-    // -----------------------------------------------------------------------
-    // Fields
-    // -----------------------------------------------------------------------
-
+    // 注入表达式求值器
     private final ExpressionEvaluator evaluator;
 
-    /** The main expression/result display */
+    // 主显示框
     private JTextField display;
 
-    /** Small secondary display showing what was computed */
+    // 历史标签
     private JLabel historyLabel;
 
-    /** Whether the display currently shows a result (affects next key behaviour) */
+    // 标记当前显示是否是“结果/提示”（包括错误提示）
     private boolean showingResult = false;
 
-    // -----------------------------------------------------------------------
-    // Constructor
-    // -----------------------------------------------------------------------
+    // 统一错误提示文本（UI 层统一用中文，避免 Error 混进表达式）
+    private static final String ERR_GENERIC = "错误";
+    private static final String ERR_INVALID = "无效表达式";
+    private static final String ERR_DIV0 = "不能除以零";
 
     public CalculatorFrame(ExpressionEvaluator evaluator) {
         this.evaluator = evaluator;
         initUI();
     }
 
-    // -----------------------------------------------------------------------
-    // UI initialisation
-    // -----------------------------------------------------------------------
+    // ------------------------- UI 构建 -------------------------
 
     private void initUI() {
         setTitle("计算器");
+
+        // 关闭程序窗口时退出应用；大小固定，禁止调整大小
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
 
-        // ── Menu bar ────────────────────────────────────────────────────────
+        // 创建菜单栏（查看/编辑/帮助）
         setJMenuBar(buildMenuBar());
 
-        // ── Root panel ──────────────────────────────────────────────────────
+        // 创建根容器
         JPanel root = new JPanel(new BorderLayout(0, 0));
         root.setBackground(new Color(32, 32, 32));
         root.setBorder(new EmptyBorder(0, 0, 0, 0));
 
-        // ── Display area ────────────────────────────────────────────────────
+        // 显示区（包含历史记录和当前输入/结果）
         root.add(buildDisplayPanel(), BorderLayout.NORTH);
 
-        // ── Button area ─────────────────────────────────────────────────────
+        // 按钮区（包括标准区和科学区）
         JPanel buttons = new JPanel(new GridLayout(1, 2, 2, 0));
         buttons.setBackground(new Color(32, 32, 32));
-
         buttons.add(buildScientificPanel());
         buttons.add(buildStandardPanelClean());
-
         root.add(buttons, BorderLayout.CENTER);
 
+        // 将根容器设置为窗口内容，调整大小以适应内容，并居中显示
         setContentPane(root);
         pack();
         setLocationRelativeTo(null);
 
-        // ── Keyboard input ──────────────────────────────────────────────────
-        display.addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                handleKeyEvent(e);
-            }
-        });
+        // 窗口显示后再请求焦点更稳定
         display.setFocusable(true);
-        display.requestFocusInWindow();
+        SwingUtilities.invokeLater(this::refocusDisplay);
     }
-
-    // -----------------------------------------------------------------------
-    // Menu bar
-    // -----------------------------------------------------------------------
 
     private JMenuBar buildMenuBar() {
         JMenuBar menuBar = new JMenuBar();
+        menuBar.setOpaque(true);
         menuBar.setBackground(new Color(45, 45, 45));
-        menuBar.setBorder(BorderFactory.createEmptyBorder());
+        menuBar.setForeground(Color.WHITE);
+        menuBar.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
 
-        // ── 查看 (View) ──────────────────────────────────────────────────────
         JMenu viewMenu = styledMenu("查看");
         JMenuItem standardItem = styledMenuItem("标准型");
         standardItem.addActionListener(e -> JOptionPane.showMessageDialog(this,
                 "当前已是标准型模式", "查看", JOptionPane.INFORMATION_MESSAGE));
         viewMenu.add(standardItem);
 
-        // ── 编辑 (Edit) ──────────────────────────────────────────────────────
         JMenu editMenu = styledMenu("编辑");
 
         JMenuItem copyItem = styledMenuItem("复制 (Ctrl+C)");
@@ -125,7 +112,6 @@ public class CalculatorFrame extends JFrame {
         editMenu.add(copyItem);
         editMenu.add(pasteItem);
 
-        // ── 帮助 (Help) ──────────────────────────────────────────────────────
         JMenu helpMenu = styledMenu("帮助");
         JMenuItem aboutItem = styledMenuItem("关于");
         aboutItem.addActionListener(e -> JOptionPane.showMessageDialog(this,
@@ -141,88 +127,110 @@ public class CalculatorFrame extends JFrame {
 
     private JMenu styledMenu(String text) {
         JMenu menu = new JMenu(text);
+        menu.setOpaque(true);
+        menu.setBackground(new Color(45, 45, 45));
         menu.setForeground(Color.WHITE);
         menu.setFont(new Font("微软雅黑", Font.PLAIN, 13));
+
+        // 下拉弹出层设背景
+        JPopupMenu popup = menu.getPopupMenu();
+        popup.setOpaque(true);
+        popup.setBackground(new Color(45, 45, 45));
+        popup.setBorder(BorderFactory.createLineBorder(new Color(70, 70, 70)));
+
         return menu;
     }
 
     private JMenuItem styledMenuItem(String text) {
         JMenuItem item = new JMenuItem(text);
+
+        // 使用自定义背景/前景
+        item.setOpaque(true);
+        item.setBackground(new Color(55, 55, 55));
+        item.setForeground(Color.WHITE);
         item.setFont(new Font("微软雅黑", Font.PLAIN, 13));
+        item.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        item.setContentAreaFilled(true);
+
         return item;
     }
 
-    // -----------------------------------------------------------------------
-    // Display panel
-    // -----------------------------------------------------------------------
-
     private JPanel buildDisplayPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(new Color(32, 32, 32));
+        panel.setBackground(new Color(0, 0, 0));
         panel.setBorder(new EmptyBorder(12, 12, 8, 12));
 
-        // History label (small, shows previous expression)
         historyLabel = new JLabel(" ");
-        historyLabel.setForeground(new Color(170, 170, 170));
+        historyLabel.setForeground(Color.WHITE);
         historyLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         historyLabel.setHorizontalAlignment(SwingConstants.RIGHT);
         panel.add(historyLabel, BorderLayout.NORTH);
 
-        // Main display
         display = new JTextField("0");
         display.setHorizontalAlignment(SwingConstants.RIGHT);
-        display.setEditable(false);
-        display.setBackground(new Color(32, 32, 32));
+        display.setEditable(true);
+
+        // 安装输入过滤器（修复前导零、错误覆盖、结果覆盖等）
+        installDocumentFilter();
+        // 安装快捷键（只接管功能键）
+        installKeyBindings();
+
+        // 显示框样式：黑底白字
+        display.setBackground(new Color(0, 0, 0));
         display.setForeground(Color.WHITE);
         display.setCaretColor(Color.WHITE);
-        display.setFont(new Font("Segoe UI", Font.PLAIN, 42));
+        display.setSelectionColor(new Color(70, 70, 70));
+        display.setSelectedTextColor(Color.WHITE);
+        display.setDisabledTextColor(Color.WHITE);
+
+        display.setFont(new Font("微软雅黑", Font.PLAIN, 42));
         display.setBorder(new EmptyBorder(2, 0, 2, 0));
+        display.setOpaque(true);
+
         display.setFocusable(true);
         panel.add(display, BorderLayout.CENTER);
 
         return panel;
     }
 
-    // -----------------------------------------------------------------------
-    // Standard button panel
-    // -----------------------------------------------------------------------
+    // ------------------------- 标准按钮面板 -------------------------
 
     private JPanel buildStandardPanelClean() {
         JPanel panel = new JPanel(new GridLayout(6, 4, 2, 2));
         panel.setBackground(new Color(32, 32, 32));
         panel.setBorder(new EmptyBorder(2, 2, 4, 4));
 
-        // Row 1: %  CE  C  ⌫
+        // 第 1 行：%  CE  C  ⌫
         panel.add(opBtn("%"));
         panel.add(clearBtn("CE"));
         panel.add(clearBtn("C"));
         panel.add(clearBtn("⌫"));
 
-        // Row 2: 1/x  x²  √x  ÷
+        // 第 2 行：1/x  x²  √x  ÷
         panel.add(sciSmallBtn("1/x"));
         panel.add(sciSmallBtn("x²"));
         panel.add(sciSmallBtn("√x"));
         panel.add(opBtn("÷"));
 
-        // Row 3: 7  8  9  ×
+        // 第 3 行：7  8  9  ×
         panel.add(numBtn("7"));
         panel.add(numBtn("8"));
         panel.add(numBtn("9"));
         panel.add(opBtn("×"));
 
-        // Row 4: 4  5  6  -
+        // 第 4 行：4  5  6  -
         panel.add(numBtn("4"));
         panel.add(numBtn("5"));
         panel.add(numBtn("6"));
         panel.add(opBtn("-"));
 
-        // Row 5: 1  2  3  +
+        // 第 5 行：1  2  3  +
         panel.add(numBtn("1"));
         panel.add(numBtn("2"));
         panel.add(numBtn("3"));
         panel.add(opBtn("+"));
 
-        // Row 6: ±  0  .  =
+        // 第 6 行：±  0  .  =
         panel.add(opBtn("±"));
         panel.add(numBtn("0"));
         panel.add(numBtn("."));
@@ -231,9 +239,7 @@ public class CalculatorFrame extends JFrame {
         return panel;
     }
 
-    // -----------------------------------------------------------------------
-    // Scientific button panel
-    // -----------------------------------------------------------------------
+    // ------------------------- 科学按钮面板 -------------------------
 
     private JPanel buildScientificPanel() {
         JPanel panel = new JPanel(new GridLayout(6, 4, 2, 2));
@@ -241,12 +247,12 @@ public class CalculatorFrame extends JFrame {
         panel.setBorder(new EmptyBorder(2, 4, 4, 2));
 
         String[][] sciButtons = {
-            { "(", ")", "n!", "mod" },
-            { "sin", "cos", "tan", "π" },
-            { "asin", "acos", "atan", "e" },
-            { "sinh", "cosh", "tanh", "x^y" },
-            { "ln", "log", "exp", "√" },
-            { "abs", "ceil", "floor", "1/x" }
+                {"(", ")", "n!", "mod"},
+                {"sin", "cos", "tan", "π"},
+                {"asin", "acos", "atan", "e"},
+                {"sinh", "cosh", "tanh", "x^y"},
+                {"ln", "log", "exp", "√"},
+                {"abs", "ceil", "floor", "1/x"}
         };
 
         for (String[] row : sciButtons) {
@@ -258,77 +264,76 @@ public class CalculatorFrame extends JFrame {
         return panel;
     }
 
-    // -----------------------------------------------------------------------
-    // Button factory helpers
-    // -----------------------------------------------------------------------
+    // ------------------------- 按钮工厂方法 -------------------------
 
-    /** Standard digit button */
     private JButton numBtn(String label) {
         JButton btn = new JButton(label);
         styleButton(btn, new Color(51, 51, 51), new Color(68, 68, 68));
         btn.setFont(new Font("Segoe UI", Font.PLAIN, 18));
-        btn.addActionListener(e -> onDigit(label));
+        btn.addActionListener(e -> {
+            onDigit(label);
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Operator button (+, -, ×, ÷, (, ), etc.) */
     private JButton opBtn(String label) {
         JButton btn = new JButton(label);
         styleButton(btn, new Color(45, 45, 45), new Color(65, 65, 65));
         btn.setFont(new Font("Segoe UI", Font.PLAIN, 18));
-        btn.addActionListener(e -> onOperator(label));
+        btn.addActionListener(e -> {
+            onOperator(label);
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Equal button */
     private JButton equalBtn() {
         JButton btn = new JButton("=");
         styleButton(btn, new Color(0, 120, 215), new Color(30, 150, 240));
         btn.setFont(new Font("Segoe UI", Font.BOLD, 20));
-        btn.addActionListener(e -> onEqual());
+        btn.addActionListener(e -> {
+            onEqual();
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Clear / backspace button */
     private JButton clearBtn(String label) {
         JButton btn = new JButton(label);
         styleButton(btn, new Color(45, 45, 45), new Color(65, 65, 65));
         btn.setForeground(new Color(230, 100, 80));
         btn.setFont(new Font("Segoe UI", Font.BOLD, 16));
-        btn.addActionListener(e -> onClear(label));
+        btn.addActionListener(e -> {
+            onClear(label);
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Memory button (MC, MR, M+, M−) */
-    private JButton utilBtn(String label) {
-        JButton btn = new JButton(label);
-        styleButton(btn, new Color(32, 32, 32), new Color(50, 50, 50));
-        btn.setForeground(new Color(140, 140, 140));
-        btn.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        btn.addActionListener(e -> onMemory(label));
-        return btn;
-    }
-
-    /** Scientific function button */
     private JButton sciBtn(String label) {
         JButton btn = new JButton(label);
         styleButton(btn, new Color(38, 38, 38), new Color(58, 58, 58));
         btn.setForeground(new Color(220, 220, 220));
         btn.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        btn.addActionListener(e -> onScientific(label));
+        btn.addActionListener(e -> {
+            onScientific(label);
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Inline scientific small button (used inside standard panel) */
     private JButton sciSmallBtn(String label) {
         JButton btn = new JButton(label);
         styleButton(btn, new Color(45, 45, 45), new Color(65, 65, 65));
         btn.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        btn.addActionListener(e -> onScientific(label));
+        btn.addActionListener(e -> {
+            onScientific(label);
+            refocusDisplay();
+        });
         return btn;
     }
 
-    /** Apply common flat-style properties to a button. */
     private void styleButton(JButton btn, Color normal, Color hover) {
         btn.setBackground(normal);
         btn.setForeground(Color.WHITE);
@@ -337,230 +342,451 @@ public class CalculatorFrame extends JFrame {
         btn.setOpaque(true);
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override public void mouseEntered(java.awt.event.MouseEvent e) { btn.setBackground(hover); }
-            @Override public void mouseExited(java.awt.event.MouseEvent e)  { btn.setBackground(normal); }
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                btn.setBackground(hover);
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                btn.setBackground(normal);
+            }
         });
     }
 
-    // -----------------------------------------------------------------------
-    // Event handlers
-    // -----------------------------------------------------------------------
+    // ------------------------- 输入与快捷键（重构核心） -------------------------
+
+    /**
+     * 把焦点拉回输入框，保证用户点按钮后仍然可以继续用键盘输入/快捷键。
+     */
+    private void refocusDisplay() {
+        if (display == null) return;
+        display.requestFocusInWindow();
+        display.setCaretPosition(display.getText().length());
+    }
+
+    /**
+     * 判断当前 display 文本是否为“错误提示文本”。
+     * 说明：兼容英文 "Error"，避免旧格式残留导致被当作表达式的一部分。
+     */
+    private boolean isErrorText(String s) {
+        if (s == null) return false;
+        return ERR_GENERIC.equals(s) || ERR_INVALID.equals(s) || ERR_DIV0.equals(s) || "Error".equalsIgnoreCase(s);
+    }
+
+    /**
+     * 统一设置显示内容，并同步设置 showingResult。
+     * asResult=true 表示当前内容是“结果/提示”（包括错误提示），后续输入数字应覆盖而不是追加。
+     */
+    private void setDisplayText(String text, boolean asResult) {
+        display.setText(text);
+        showingResult = asResult;
+    }
+
+    /**
+     * 安装 DocumentFilter，用于修复输入体验：
+     * 1）错误提示状态下：键盘输入任意字符都直接覆盖错误提示
+     * 2）结果状态下：键盘输入数字会覆盖结果（开始新输入）
+     * 3）当前为 "0" 或 "-0" 时：键盘输入数字替换掉 0，避免出现 05 或 -05
+     */
+    private void installDocumentFilter() {
+        if (!(display.getDocument() instanceof AbstractDocument doc)) return;
+
+        doc.setDocumentFilter(new DocumentFilter() {
+            @Override
+            public void insertString(FilterBypass fb, int offset, String string, AttributeSet attr)
+                    throws BadLocationException {
+                replace(fb, offset, 0, string, attr);
+            }
+
+            @Override
+            public void replace(FilterBypass fb, int offset, int length, String text, AttributeSet attrs)
+                    throws BadLocationException {
+                String cur = fb.getDocument().getText(0, fb.getDocument().getLength());
+
+                // 错误提示：任意输入覆盖整段
+                if (isErrorText(cur)) {
+                    fb.replace(0, cur.length(), text, attrs);
+                    showingResult = false;
+                    return;
+                }
+
+                // 结果态 + 输入数字：覆盖整段
+                if (showingResult && text != null && text.length() == 1 && Character.isDigit(text.charAt(0))) {
+                    fb.replace(0, cur.length(), text, attrs);
+                    showingResult = false;
+                    return;
+                }
+
+                // 前导零：0 或 -0 + 输入数字 -> 替换整段
+                if (("0".equals(cur) || "-0".equals(cur))
+                        && text != null && text.length() == 1 && Character.isDigit(text.charAt(0))) {
+                    fb.replace(0, cur.length(), text, attrs);
+                    return;
+                }
+
+                fb.replace(offset, length, text, attrs);
+            }
+        });
+    }
+
+    /**
+     * 安装快捷键（Key Bindings），只接管功能键：
+     * - Enter：=
+     * - Backspace：⌫
+     * - Esc：C
+     * - Delete：CE
+     *
+     * 其余字符输入（数字、运算符等）交给 JTextField 默认行为。
+     */
+    private void installKeyBindings() {
+        InputMap im = display.getInputMap(JComponent.WHEN_FOCUSED);
+        ActionMap am = display.getActionMap();
+
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "calc.equal");
+        am.put("calc.equal", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onEqual();
+                refocusDisplay();
+            }
+        });
+
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_BACK_SPACE, 0), "calc.backspace");
+        am.put("calc.backspace", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onClear("⌫");
+                refocusDisplay();
+            }
+        });
+
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "calc.clear");
+        am.put("calc.clear", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onClear("C");
+                refocusDisplay();
+            }
+        });
+
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "calc.clearEntry");
+        am.put("calc.clearEntry", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                onClear("CE");
+                refocusDisplay();
+            }
+        });
+    }
+
+    // ------------------------- 事件处理（按钮逻辑） -------------------------
 
     private void onDigit(String d) {
-        if (showingResult) {
-            // Start fresh expression after a result
-            display.setText(d.equals(".") ? "0." : d);
-            showingResult = false;
-        } else {
-            String cur = display.getText();
-            if ("0".equals(cur) && !".".equals(d)) {
-                display.setText(d);
-            } else {
-                display.setText(cur + d);
-            }
+        String cur = display.getText();
+
+        // 结果态或错误态：输入数字直接开始新表达式
+        if (showingResult || isErrorText(cur)) {
+            setDisplayText(d.equals(".") ? "0." : d, false);
+            return;
         }
+
+        // -0 状态下输入数字，应该变成 -5 而不是 -05
+        if ("-0".equals(cur) && !".".equals(d)) {
+            setDisplayText("-" + d, false);
+            return;
+        }
+
+        // 0 状态下输入数字，替换 0
+        if ("0".equals(cur) && !".".equals(d)) {
+            setDisplayText(d, false);
+            return;
+        }
+
+        setDisplayText(cur + d, false);
     }
 
     private void onOperator(String op) {
-        showingResult = false;
         String cur = display.getText();
+
+        // 错误提示状态下按运算符：从 0 开始
+        if (isErrorText(cur)) {
+            cur = "0";
+            setDisplayText(cur, false);
+        }
+
+        // 按下运算符后认为进入输入态
+        showingResult = false;
+
         switch (op) {
-            case "÷" -> display.setText(cur + "/");
-            case "×" -> display.setText(cur + "*");
+            case "÷" -> setDisplayText(cur + "/", false);
+            case "×" -> setDisplayText(cur + "*", false);
             case "±" -> toggleSign();
             case "%" -> onPercent();
-            default  -> display.setText(cur + op);
+            default -> setDisplayText(cur + op, false);
         }
     }
 
+    /**
+     * 正负号切换（±）规则：
+     * - 错误提示：回到 0
+     * - 0：保持 0（不产生 -0）
+     * - -0：变回 0
+     * - 其它：加/去负号
+     */
     private void toggleSign() {
         String cur = display.getText();
+
+        if (isErrorText(cur)) {
+            setDisplayText("0", false);
+            return;
+        }
+
+        if ("0".equals(cur) || "-0".equals(cur)) {
+            setDisplayText("0", false);
+            return;
+        }
+
         if (cur.startsWith("-")) {
-            display.setText(cur.substring(1));
+            setDisplayText(cur.substring(1), false);
         } else {
-            display.setText("-" + cur);
+            setDisplayText("-" + cur, false);
         }
     }
 
     private void onPercent() {
+        String cur = display.getText();
+        if (isErrorText(cur)) {
+            setDisplayText(ERR_GENERIC, true);
+            return;
+        }
+
         try {
-            double val = evaluator.evaluate(display.getText());
-            display.setText(ExpressionEvaluator.format(val / 100));
+            double val = evaluator.evaluate(cur);
+            setDisplayText(ExpressionEvaluator.format(val / 100), true);
+        } catch (ArithmeticException ex) {
+            setDisplayText(mapArithmeticError(ex), true);
         } catch (Exception ex) {
-            display.setText("错误");
+            setDisplayText(ERR_GENERIC, true);
         }
     }
 
     private void onClear(String btn) {
         switch (btn) {
             case "C", "CE" -> {
-                display.setText("0");
+                setDisplayText("0", false);
                 historyLabel.setText(" ");
-                showingResult = false;
             }
             case "⌫" -> {
                 String cur = display.getText();
-                if (showingResult || cur.length() <= 1) {
-                    display.setText("0");
-                    showingResult = false;
-                } else {
-                    display.setText(cur.substring(0, cur.length() - 1));
+
+                // 结果态或错误态，按退格直接清回 0
+                if (showingResult || isErrorText(cur) || cur.length() <= 1) {
+                    setDisplayText("0", false);
+                    return;
                 }
+
+                setDisplayText(cur.substring(0, cur.length() - 1), false);
             }
         }
     }
 
     private void onEqual() {
         String expr = display.getText();
+
+        // 错误提示状态下按等号，保持错误提示即可
+        if (isErrorText(expr)) {
+            setDisplayText(expr, true);
+            return;
+        }
+
         try {
             double result = evaluator.evaluate(expr);
             historyLabel.setText(expr + " =");
-            display.setText(ExpressionEvaluator.format(result));
-            showingResult = true;
+            setDisplayText(ExpressionEvaluator.format(result), true);
         } catch (ArithmeticException ex) {
             historyLabel.setText(expr + " =");
-            display.setText("不能除以零");
-            showingResult = true;
+            setDisplayText(mapArithmeticError(ex), true);
         } catch (Exception ex) {
             historyLabel.setText(expr + " =");
-            display.setText("无效表达式");
-            showingResult = true;
+            setDisplayText(ERR_INVALID, true);
         }
     }
 
-    private double memory = 0;
+    /**
+     * 把数学异常转换为更友好的中文提示，避免“所有 ArithmeticException 都显示不能除以零”。
+     */
+    private String mapArithmeticError(ArithmeticException ex) {
+        String msg = ex.getMessage();
+        if (msg == null) return ERR_GENERIC;
 
-    private void onMemory(String btn) {
-        switch (btn) {
-            case "MC" -> memory = 0;
-            case "MR" -> {
-                display.setText(ExpressionEvaluator.format(memory));
-                showingResult = false;
-            }
-            case "M+" -> {
-                try {
-                    memory += evaluator.evaluate(display.getText());
-                } catch (Exception ignored) {}
-            }
-            case "M-" -> {
-                try {
-                    memory -= evaluator.evaluate(display.getText());
-                } catch (Exception ignored) {}
-            }
+        if (msg.contains("Division by zero") || msg.contains("Modulo by zero")) {
+            return ERR_DIV0;
         }
+
+        if (msg.contains("Factorial is only defined")) {
+            return "阶乘只支持非负整数";
+        }
+
+        if (msg.contains("Factorial overflow")) {
+            return "阶乘结果过大";
+        }
+
+        if (msg.contains("sqrt of negative")) {
+            return "负数不能开平方";
+        }
+
+        if (msg.contains("log of non-positive")) {
+            return "log 参数必须大于 0";
+        }
+
+        if (msg.contains("ln of non-positive")) {
+            return "ln 参数必须大于 0";
+        }
+
+        return ERR_GENERIC;
+    }
+
+    // ------------------------- 科学输入工具方法 -------------------------
+
+    private boolean endsWithOperatorOrLeftParen(String s) {
+        if (s == null || s.isEmpty()) return true;
+        char last = s.charAt(s.length() - 1);
+        return last == '+' || last == '-' || last == '*' || last == '/' ||
+                last == '%' || last == '^' || last == '(';
     }
 
     private void onScientific(String func) {
+        // 标准区按钮显示为 √x，实际执行 sqrt
+        if ("√x".equals(func)) func = "√";
+
         String cur = display.getText();
+        boolean treatAsEmpty = "0".equals(cur) || isErrorText(cur);
+
         switch (func) {
-            // Insert function prefix
+            // 科学区括号按钮：转发到运算符输入
+            case "(", ")" -> {
+                if (isErrorText(cur)) setDisplayText("0", false);
+                onOperator(func);
+            }
+
+            // 函数（都需要括号参数）
             case "sin", "cos", "tan", "asin", "acos", "atan",
                  "sinh", "cosh", "tanh", "ln", "log", "exp",
-                 "abs", "ceil", "floor", "sqrt" -> {
-                if (showingResult) {
-                    display.setText(func + "(" + cur + ")");
-                    showingResult = false;
+                 "abs", "ceil", "floor" -> {
+                String token = func + "(";
+
+                // 错误/初始：直接替换为 func(
+                if (treatAsEmpty) {
+                    setDisplayText(token, false);
+                    return;
+                }
+
+                // 结果态：对结果做函数运算 func(result)
+                if (showingResult && !isErrorText(cur)) {
+                    setDisplayText(func + "(" + cur + ")", false);
+                    return;
+                }
+
+                // 输入态：决定是否补 *
+                if (endsWithOperatorOrLeftParen(cur)) {
+                    setDisplayText(cur + token, false);
                 } else {
-                    display.setText(cur + func + "(");
+                    setDisplayText(cur + "*" + token, false);
                 }
             }
-            // π constant
-            case "π" -> {
-                if (showingResult) {
-                    display.setText("pi");
-                    showingResult = false;
-                } else {
-                    display.setText(cur + "pi");
-                }
-            }
-            // e constant
-            case "e" -> {
-                if (showingResult) {
-                    display.setText("e");
-                    showingResult = false;
-                } else {
-                    display.setText(cur + "e");
-                }
-            }
-            // x² – square the current expression
-            case "x²" -> {
-                display.setText("(" + cur + ")^2");
-                showingResult = false;
-            }
-            // x^y – start power expression
-            case "x^y" -> {
-                display.setText(cur + "^");
-                showingResult = false;
-            }
-            // √ – square root of current value
+
+            // 根号：sqrt
             case "√" -> {
-                if (showingResult) {
-                    display.setText("sqrt(" + cur + ")");
-                    showingResult = false;
+                String token = "sqrt(";
+
+                if (treatAsEmpty) {
+                    setDisplayText(token, false);
+                    return;
+                }
+
+                if (showingResult && !isErrorText(cur)) {
+                    setDisplayText("sqrt(" + cur + ")", false);
+                    return;
+                }
+
+                if (endsWithOperatorOrLeftParen(cur)) {
+                    setDisplayText(cur + token, false);
                 } else {
-                    display.setText(cur + "sqrt(");
+                    setDisplayText(cur + "*" + token, false);
                 }
             }
-            // 1/x – reciprocal
+
+            // 常量 π
+            case "π" -> {
+                if (treatAsEmpty) {
+                    setDisplayText("pi", false);
+                } else if (endsWithOperatorOrLeftParen(cur)) {
+                    setDisplayText(cur + "pi", false);
+                } else {
+                    setDisplayText(cur + "*pi", false);
+                }
+            }
+
+            // 常量 e
+            case "e" -> {
+                if (treatAsEmpty) {
+                    setDisplayText("e", false);
+                } else if (endsWithOperatorOrLeftParen(cur)) {
+                    setDisplayText(cur + "e", false);
+                } else {
+                    setDisplayText(cur + "*e", false);
+                }
+            }
+
+            // 平方
+            case "x²" -> {
+                if (isErrorText(cur)) {
+                    setDisplayText("0", false);
+                    cur = "0";
+                }
+                setDisplayText("(" + cur + ")^2", false);
+            }
+
+            // 幂运算
+            case "x^y" -> {
+                if (isErrorText(cur)) {
+                    setDisplayText("0", false);
+                    cur = "0";
+                }
+                setDisplayText(cur + "^", false);
+            }
+
+            // 倒数
             case "1/x" -> {
-                display.setText("1/(" + cur + ")");
-                showingResult = false;
+                if (isErrorText(cur)) {
+                    setDisplayText("0", false);
+                    cur = "0";
+                }
+                setDisplayText("1/(" + cur + ")", false);
             }
-            // mod
+
+            // 取模
             case "mod" -> {
-                display.setText(cur + "%");
-                showingResult = false;
+                if (isErrorText(cur)) {
+                    setDisplayText("0", false);
+                    cur = "0";
+                }
+                setDisplayText(cur + "%", false);
             }
-            // n! – factorial
+
+            // 阶乘
             case "n!" -> {
-                display.setText("(" + cur + ")!");
-                showingResult = false;
+                if (isErrorText(cur)) {
+                    setDisplayText("0", false);
+                    cur = "0";
+                }
+                setDisplayText("(" + cur + ")!", false);
             }
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Keyboard support
-    // -----------------------------------------------------------------------
-
-    private void handleKeyEvent(KeyEvent e) {
-        int code = e.getKeyCode();
-        char ch = e.getKeyChar();
-
-        if (Character.isDigit(ch)) {
-            onDigit(String.valueOf(ch));
-        } else if (ch == '.') {
-            onDigit(".");
-        } else if (ch == '+') {
-            onOperator("+");
-        } else if (ch == '-') {
-            onOperator("-");
-        } else if (ch == '*') {
-            onOperator("×");
-        } else if (ch == '/') {
-            onOperator("÷");
-        } else if (ch == '(') {
-            onOperator("(");
-        } else if (ch == ')') {
-            onOperator(")");
-        } else if (ch == '^') {
-            onOperator("^");
-        } else if (ch == '%') {
-            onOperator("%");
-        } else if (code == KeyEvent.VK_ENTER || ch == '=') {
-            onEqual();
-        } else if (code == KeyEvent.VK_BACK_SPACE) {
-            onClear("⌫");
-        } else if (code == KeyEvent.VK_ESCAPE) {
-            onClear("C");
-        } else if (code == KeyEvent.VK_DELETE) {
-            onClear("CE");
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Clipboard
-    // -----------------------------------------------------------------------
+    // ------------------------- 剪贴板 -------------------------
 
     private void copyToClipboard() {
         String text = display.getText();
@@ -571,17 +797,30 @@ public class CalculatorFrame extends JFrame {
     private void pasteFromClipboard() {
         try {
             Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-            String text = (String) clipboard.getData(DataFlavor.stringFlavor);
-            if (text != null) {
-                if (showingResult) {
-                    display.setText(text.trim());
-                    showingResult = false;
-                } else {
-                    display.setText(display.getText() + text.trim());
-                }
+
+            // 只处理纯文本，避免 IntelliJ 私有 DataFlavor 导致异常
+            if (!clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
+                return;
             }
-        } catch (Exception ex) {
-            // Clipboard access failed – silently ignore
+
+            Object data = clipboard.getData(DataFlavor.stringFlavor);
+            if (!(data instanceof String)) {
+                return;
+            }
+
+            String text = ((String) data).trim();
+            if (text.isEmpty()) {
+                return;
+            }
+
+            // 结果态/错误态粘贴：覆盖；否则追加
+            if (showingResult || isErrorText(display.getText())) {
+                setDisplayText(text, false);
+            } else {
+                setDisplayText(display.getText() + text, false);
+            }
+        } catch (Exception ignored) {
+            // 忽略剪贴板异常
         }
     }
 }
